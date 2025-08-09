@@ -119,7 +119,7 @@ class Fetch:
 
 # --- MCP Server Setup ---
 mcp = FastMCP(
-    "Job Finder MCP Server",
+    "Weekend Planner MCP Server",
     auth=SimpleBearerAuthProvider(TOKEN),
 )
 
@@ -128,80 +128,76 @@ mcp = FastMCP(
 async def validate() -> str:
     return MY_NUMBER
 
-# --- Tool: job_finder (now smart!) ---
-JobFinderDescription = RichToolDescription(
-    description="Smart job tool: analyze descriptions, fetch URLs, or search jobs based on free text.",
-    use_when="Use this to evaluate job descriptions or search for jobs using freeform goals.",
-    side_effects="Returns insights, fetched job descriptions, or relevant job links.",
-)
-
-@mcp.tool(description=JobFinderDescription.model_dump_json())
-async def job_finder(
-    user_goal: Annotated[str, Field(description="The user's goal (can be a description, intent, or freeform query)")],
-    job_description: Annotated[str | None, Field(description="Full job description text, if available.")] = None,
-    job_url: Annotated[AnyUrl | None, Field(description="A URL to fetch a job description from.")] = None,
-    raw: Annotated[bool, Field(description="Return raw HTML content if True")] = False,
+# --- Tool: generate_weekend_plan ---
+# System prompt (configured on PuchAI side):
+# "You are an expert weekend planner who creates personalized, engaging weekend plans based on user preferences for staying in or going out, budget, interests, and location."
+@mcp.tool(description="Generates a weekend plan based on user preferences")
+async def generate_weekend_plan(
+    user_preference: Annotated[str, Field(description="Stay in or go out")],
+    interests: Annotated[str | None, Field(description="User interests, e.g., movies, parks, baking")] = None,
+    location: Annotated[str | None, Field(description="User city or location")] = None,
+    budget: Annotated[str | None, Field(description="Budget level: low, medium, high")] = None,
 ) -> str:
-    """
-    Handles multiple job discovery methods: direct description, URL fetch, or freeform search query.
-    """
-    if job_description:
-        return (
-            f"📝 **Job Description Analysis**\n\n"
-            f"---\n{job_description.strip()}\n---\n\n"
-            f"User Goal: **{user_goal}**\n\n"
-            f"💡 Suggestions:\n- Tailor your resume.\n- Evaluate skill match.\n- Consider applying if relevant."
-        )
+    return (
+        f"User Preferences:\n"
+        f"- Stay in or go out: {user_preference}\n"
+        f"- Interests: {interests or 'general activities'}\n"
+        f"- Location: {location or 'unspecified'}\n"
+        f"- Budget: {budget or 'medium'}"
+    )
 
-    if job_url:
-        content, _ = await Fetch.fetch_url(str(job_url), Fetch.USER_AGENT, force_raw=raw)
-        return (
-            f"🔗 **Fetched Job Posting from URL**: {job_url}\n\n"
-            f"---\n{content.strip()}\n---\n\n"
-            f"User Goal: **{user_goal}**"
-        )
+# --- Tool: surprise_me ---
+# System prompt:
+# "You are a creative weekend planner who suggests surprising and fun activities for the weekend."
+@mcp.tool(description="Returns a fun surprise weekend plan")
+async def surprise_me() -> str:
+    return "User requests a surprise weekend plan."
 
-    if "look for" in user_goal.lower() or "find" in user_goal.lower():
-        links = await Fetch.google_search_links(user_goal)
-        return (
-            f"🔍 **Search Results for**: _{user_goal}_\n\n" +
-            "\n".join(f"- {link}" for link in links)
-        )
+# --- Tool: format_share_text ---
+# System prompt:
+# "You are an expert at formatting plans into clear, friendly text ideal for sharing with friends or family."
+@mcp.tool(description="Formats a weekend plan text for easy sharing")
+async def format_share_text(
+    plan_text: Annotated[str, Field(description="Raw plan text")]
+) -> str:
+    return plan_text
 
-    raise McpError(ErrorData(code=INVALID_PARAMS, message="Please provide either a job description, a job URL, or a search query in user_goal."))
+# --- Tool: raksha_bandhan_special ---
+# System prompt:
+# "You are a cultural events expert who suggests fun and memorable Raksha Bandhan sibling activities."
+@mcp.tool(description="Special Raksha Bandhan sibling activities")
+async def raksha_bandhan_special() -> str:
+    return "User requests special Raksha Bandhan sibling activities."
 
+# --- Tool: weather_prompt ---
+# System prompt:
+# "You are a helpful assistant who politely asks the user about the current weather to tailor suggestions."
+@mcp.tool(description="Ask user about local weather to tailor suggestions")
+async def weather_prompt() -> str:
+    return "Please ask the user about the current weather (e.g., sunny, rainy, chilly) to better tailor weekend plans."
 
-# Image inputs and sending images
+# --- Tool: easter_eggs ---
+# System prompt:
+# "You are a witty and empathetic weekend planner who responds creatively to special user phrases such as financial constraints."
+@mcp.tool(description="Responds to special phrases like 'I have no money'")
+async def easter_eggs(
+    trigger_phrase: Annotated[str, Field(description="User's special phrase")]
+) -> str:
+    return f"User says: {trigger_phrase}"
 
-MAKE_IMG_BLACK_AND_WHITE_DESCRIPTION = RichToolDescription(
-    description="Convert an image to black and white and save it.",
-    use_when="Use this tool when the user provides an image URL and requests it to be converted to black and white.",
-    side_effects="The image will be processed and saved in a black and white format.",
-)
+# --- Tool: location_search ---
+# System prompt:
+# "You are a location-aware weekend guide who finds fun activities or places based on the user's location and interest queries."
+@mcp.tool(description="Searches for fun things to do based on location and interest")
+async def location_search(
+    location_query: Annotated[str, Field(description="Location name, e.g., city or neighborhood")],
+    activity_query: Annotated[str | None, Field(description="Type of activity user is interested in")] = None,
+) -> str:
+    return (
+        f"Location Query: {location_query}\n"
+        f"Activity Query: {activity_query or 'any'}"
+    )
 
-@mcp.tool(description=MAKE_IMG_BLACK_AND_WHITE_DESCRIPTION.model_dump_json())
-async def make_img_black_and_white(
-    puch_image_data: Annotated[str, Field(description="Base64-encoded image data to convert to black and white")] = None,
-) -> list[TextContent | ImageContent]:
-    import base64
-    import io
-
-    from PIL import Image
-
-    try:
-        image_bytes = base64.b64decode(puch_image_data)
-        image = Image.open(io.BytesIO(image_bytes))
-
-        bw_image = image.convert("L")
-
-        buf = io.BytesIO()
-        bw_image.save(buf, format="PNG")
-        bw_bytes = buf.getvalue()
-        bw_base64 = base64.b64encode(bw_bytes).decode("utf-8")
-
-        return [ImageContent(type="image", mimeType="image/png", data=bw_base64)]
-    except Exception as e:
-        raise McpError(ErrorData(code=INTERNAL_ERROR, message=str(e)))
 
 # --- Run MCP Server ---
 async def main():
